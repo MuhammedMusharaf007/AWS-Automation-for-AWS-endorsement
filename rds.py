@@ -1,3 +1,4 @@
+from logging import exception
 import boto3
 import datetime
 
@@ -71,4 +72,64 @@ class Rds(object):
                 except Exception as e:
                     print(str(e))
 
-    
+    def _cleanup_cluster(self, cluster):
+        tags = cluster['TagList']
+        if self._can_delete_instance(tags):
+            self._delete_cluster(cluster['DBClusterIdentifier'])
+        else:
+            if self._can_stop_instance(tags) and cluster['Status'] == 'available':
+                try:
+                    self._stop_cluster(cluster['DBClusterIdentifier'])
+                except Exception as e:
+                    print(str(e))
+
+    def _cleanup_snapshots_clusters(self):
+        snapshots = self.rds.describe_db_cluster_snapshots()
+        for snapshot in snapshots['DBClusterSnapshots']:
+            tags = snapshot['TagList']
+            if self._can_delete_snapshot(tags) and self._is_older_snapshot(
+                    str(snapshot['SnapshotCreateTime']).split(" ")):
+                try:
+                    self._delete_cluster_snapshot(
+                        snapshot['DBClusterSnapshotIdentifier'])
+                except Exception as e:
+                    print(str(e))     
+
+    def _cleanup_snapshot_instances(self):
+        snapshots = self.rds.describe_db_snapshots()
+        for snapshot in snapshots['DBSnapshots']:
+            tags = snapshot['TagList']
+            if self._can_delete_snapshot(tags) and self._is_older_snapshot(
+                str(snapshot['SnapshotCreateTime']).split(" ")):
+                try:
+                    self._delete_instance_snapshot(
+                        snapshot['DBSnapshotIdentifier'])
+                except Exception as e:
+                    print(str(e))
+
+    @staticmethod
+    def _is_older_snapshot(snapshot_datetime):
+        snapshot_date = snapshot_datetime[0].split("-")
+        snapshot_date = datetime.date(int(snapshot_date[0]), int(
+            snapshot_date[1]), int(snapshot_date[2]))
+        today = datetime.date.today()
+        if abs(today - snapshot_date).days > 2:
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def _checl_snapshot_tag(tags):
+        flag = False
+        for tag in tags:
+            if tag['Key'].lower() == 'retain' and tag['Value'].lower() == 'true':
+                flag = True
+        if flag:
+            return True
+        else:
+            return False
+
+if __name__ == "__main__":
+    rds = Rds('us-east-1')
+    rds.cleanup_snapshot
+    rds.cleanup_instances
